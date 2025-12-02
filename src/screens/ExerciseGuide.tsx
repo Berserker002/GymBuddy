@@ -1,21 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { colors, spacing, radii } from '../theme';
-import { fetchExerciseGuide } from '../api/mockApi';
-import { ExerciseGuideEntry } from '../types/workout';
+import { apiClient, ExerciseGuideResponse } from '../api/client';
 
 const ExerciseGuideScreen: React.FC = () => {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<ExerciseGuideEntry[]>([]);
+  const [results, setResults] = useState<ExerciseGuideResponse[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const runSearch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await apiClient.getExerciseGuide({ exercise_name: query || undefined, image_url: null });
+      setResults([response]);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch exercise guide');
+    } finally {
+      setLoading(false);
+    }
+  }, [query]);
 
   useEffect(() => {
-    setLoading(true);
-    fetchExerciseGuide(query).then((data) => {
-      setResults(data);
-      setLoading(false);
-    });
-  }, [query]);
+    runSearch();
+  }, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -29,34 +38,29 @@ const ExerciseGuideScreen: React.FC = () => {
         onChangeText={setQuery}
         autoCapitalize="none"
       />
-      <Pressable style={styles.secondaryButton}>
-        <Text style={styles.secondaryText}>Upload image</Text>
+      <Pressable style={styles.secondaryButton} onPress={runSearch} disabled={loading}>
+        {loading ? <ActivityIndicator color={colors.textPrimary} /> : <Text style={styles.secondaryText}>Search</Text>}
       </Pressable>
 
       {loading && <ActivityIndicator color={colors.primary} />}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {results.map((entry) => (
-        <View key={entry.name} style={styles.resultCard}>
-          <Text style={styles.resultTitle}>{entry.name}</Text>
+      {results.map((entry, idx) => (
+        <View key={`${entry.metadata?.source || 'guide'}-${idx}`} style={styles.resultCard}>
+          <Text style={styles.resultTitle}>{(query || 'Exercise').replace(/_/g, ' ')}</Text>
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Muscles</Text>
             <Text style={styles.sectionBody}>{entry.muscles.join(', ')}</Text>
           </View>
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Setup</Text>
-            <Text style={styles.sectionBody}>{entry.setup}</Text>
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Execution</Text>
-            <Text style={styles.sectionBody}>{entry.execution}</Text>
+            <Text style={styles.sectionTitle}>Steps</Text>
+            {entry.steps.map((step, stepIdx) => (
+              <Text key={stepIdx} style={styles.sectionBody}>• {step}</Text>
+            ))}
           </View>
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Mistakes</Text>
-            <Text style={styles.sectionBody}>{entry.mistakes}</Text>
-          </View>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Safety</Text>
-            <Text style={styles.sectionBody}>{entry.safety}</Text>
+            <Text style={styles.sectionBody}>{entry.mistakes.join(', ')}</Text>
           </View>
           <Pressable style={styles.primaryButton}>
             <Text style={styles.primaryText}>Add to Workout</Text>
@@ -103,6 +107,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryText: { color: colors.textPrimary, fontWeight: '700' },
+  error: {
+    color: '#ef4444',
+    fontWeight: '600',
+  },
 });
 
 export default ExerciseGuideScreen;

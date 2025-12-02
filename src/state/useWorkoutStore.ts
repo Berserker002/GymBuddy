@@ -1,16 +1,25 @@
 import create from 'zustand';
-import { initProgram } from '../api/mockApi';
-import { ExercisePlan, Profile, WorkoutLog, WorkoutPlan } from '../types/workout';
+import { apiClient } from '../api/client';
+import { ExercisePlan, FinishSummary, Profile, WorkoutLog, WorkoutPlan } from '../types/workout';
 
 type WorkoutState = {
   profile: Profile;
   plan: WorkoutPlan;
+  workoutId?: string;
+  programId?: string;
   logs: WorkoutLog[];
   loadingPlan: boolean;
+  savingChanges: boolean;
+  finishing: boolean;
+  planError?: string;
+  summary?: FinishSummary | null;
   toggleSetCompletion: (exerciseId: string, setIndex: number, weight: number) => void;
   updateExercise: (updated: ExercisePlan) => void;
   setProfile: (profile: Profile) => void;
   loadPlan: (profile?: Profile) => Promise<void>;
+  fetchTodayWorkout: () => Promise<void>;
+  persistChanges: () => Promise<void>;
+  completeWorkout: () => Promise<void>;
   reset: () => void;
 };
 
@@ -60,9 +69,15 @@ const defaultPlan: WorkoutPlan = {
 export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   profile: defaultProfile,
   plan: defaultPlan,
+  workoutId: undefined,
+  programId: undefined,
   logs: [],
   loadingPlan: false,
-  toggleSetCompletion: (exerciseId, setIndex, weight) =>
+  savingChanges: false,
+  finishing: false,
+  summary: null,
+  toggleSetCompletion: (exerciseId, setIndex, weight) => {
+    const { workoutId, plan } = get();
     set((state) => {
       const exercise = state.plan.exercises.find((ex) => ex.id === exerciseId);
       if (!exercise) return state;
@@ -87,7 +102,30 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
         : [...state.logs, newLog];
 
       return { logs: updatedLogs };
-    }),
+    });
+
+    if (!workoutId) return;
+    const exercise = plan.exercises.find((ex) => ex.id === exerciseId);
+    if (!exercise) return;
+
+    const logEntry = get().logs.find((log) => log.exerciseId === exerciseId);
+    const completed = (logEntry?.weights || []).filter((value) => value !== null).length === exercise.sets;
+    const repsString = Array.from({ length: exercise.sets })
+      .map(() => exercise.reps)
+      .join(',');
+
+    apiClient
+      .logWorkout({
+        workout_id: workoutId,
+        exercise_id: exerciseId,
+        actual_weight: weight,
+        target_weight: exercise.target_weight,
+        sets: exercise.sets,
+        reps: repsString,
+        completed,
+      })
+      .catch((error) => set({ planError: error.message || 'Failed to log set' }));
+  },
   updateExercise: (updated) =>
     set((state) => ({
       plan: {
@@ -98,9 +136,107 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   setProfile: (profile) => set({ profile }),
   loadPlan: async (profileInput) => {
     const profile = profileInput ?? get().profile;
-    set({ loadingPlan: true, profile });
-    const plan = await initProgram(profile);
-    set({ plan, loadingPlan: false, logs: [] });
+    set({ loadingPlan: true, profile, planError: undefined });
+    try {
+      const payload = {
+        goal: profile.goal.toLowerCase() as 'hypertrophy' | 'strength' | 'fat_loss',
+        experience: profile.experience.toLowerCase() as 'beginner' | 'intermediate' | 'advanced',
+        equipment: [profile.equipment.toLowerCase()],
+        lifts: profile.lifts,
+      };
+      const program = await apiClient.initializeProgram(payload);
+      set({ programId: program.id });
+      await get().fetchTodayWorkout();
+    } catch (error: any) {
+      set({ planError: error.message || 'Failed to generate program' });
+    } finally {
+      set({ loadingPlan: false });
+    }
   },
-  reset: () => set({ plan: defaultPlan, logs: [], profile: defaultProfile, loadingPlan: false }),
+  fetchTodayWorkout: async () => {
+    set({ loadingPlan: true, planError: undefined, summary: null });
+    try {
+      const today = await apiClient.getTodaysWorkout();
+      const profile = get().profile;
+      const mapExercise = (exercise: ExercisePlan): ExercisePlan => ({
+        ...exercise,
+        name: exercise.name || exercise.id.replace(/_/g, ' '),
+        actions: exercise.actions || { edited: false, removed: false, swap: false },
+      });
+
+      const plan: WorkoutPlan = {
+        day: today.day,
+        goal: profile.goal,
+        exercises: today.exercises.map((exercise) =>
+          mapExercise({
+            ...exercise,
+            actions: { edited: false, removed: false, swap: false },
+          })
+        ),
+      };
+
+      set({ plan, workoutId: today.workout_id, logs: [] });
+    } catch (error: any) {
+      set({ planError: error.message || 'Failed to load today\'s workout' });
+    } finally {
+      set({ loadingPlan: false });
+    }
+  },
+  persistChanges: async () => {
+    const { plan } = get();
+    const changes = plan.exercises
+      .filter((exercise) => exercise.actions.swap)
+      .map((exercise) => ({
+        exercise_id: exercise.id,
+        action: 'swap' as const,
+        new_exercise: `${exercise.id}_variation`,
+      }));
+
+    if (!changes.length) return;
+
+    set({ savingChanges: true, planError: undefined });
+    try {
+      await apiClient.updateWorkout({ day: plan.day, changes });
+      set({
+        plan: {
+          ...plan,
+          exercises: plan.exercises.map((exercise) => ({
+            ...exercise,
+            actions: { ...exercise.actions, swap: false, edited: false, removed: false },
+          })),
+        },
+      });
+    } catch (error: any) {
+      set({ planError: error.message || 'Failed to save changes' });
+    } finally {
+      set({ savingChanges: false });
+    }
+  },
+  completeWorkout: async () => {
+    const workoutId = get().workoutId;
+    if (!workoutId) return;
+
+    set({ finishing: true, planError: undefined });
+    try {
+      const result = await apiClient.finishWorkout(workoutId);
+      set({ summary: { message: result.message, progress: result.progress } });
+    } catch (error: any) {
+      set({ planError: error.message || 'Failed to finish workout' });
+    } finally {
+      set({ finishing: false });
+    }
+  },
+  reset: () =>
+    set({
+      plan: defaultPlan,
+      logs: [],
+      profile: defaultProfile,
+      loadingPlan: false,
+      savingChanges: false,
+      planError: undefined,
+      workoutId: undefined,
+      programId: undefined,
+      finishing: false,
+      summary: null,
+    }),
 }));

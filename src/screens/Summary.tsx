@@ -6,7 +6,7 @@ import { colors, spacing, radii } from '../theme';
 import { RootStackParamList } from '../../App';
 
 const SummaryScreen: React.FC<NativeStackScreenProps<RootStackParamList, 'Summary'>> = ({ navigation }) => {
-  const { plan, logs, reset } = useWorkoutStore();
+  const { plan, logs, reset, summary } = useWorkoutStore();
 
   const handleSave = () => {
     reset();
@@ -16,7 +16,16 @@ const SummaryScreen: React.FC<NativeStackScreenProps<RootStackParamList, 'Summar
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.heading}>Workout Summary</Text>
-      <Text style={styles.motivation}>"Nice work! You outpaced last week on pressing volume."</Text>
+      <Text style={styles.motivation}>{summary?.message || 'No prior data to compare yet.'}</Text>
+
+      {summary?.progress ? (
+        <View style={styles.card}>
+          <Text style={styles.exercise}>Progress since last session</Text>
+          {Object.entries(summary.progress).map(([exerciseId, delta]) => (
+            <Text key={exerciseId} style={styles.meta}>{exerciseId.replace(/_/g, ' ')}: {delta}</Text>
+          ))}
+        </View>
+      ) : null}
 
       {plan.exercises.map((exercise) => {
         const log = logs.find((l) => l.exerciseId === exercise.id);

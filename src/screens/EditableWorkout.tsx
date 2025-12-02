@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useWorkoutStore } from '../state/useWorkoutStore';
 import { colors, spacing, radii } from '../theme';
@@ -9,7 +9,7 @@ import { RootStackParamList } from '../../App';
 type Props = NativeStackScreenProps<RootStackParamList, 'EditableWorkout'>;
 
 const EditableWorkoutScreen: React.FC<Props> = ({ navigation }) => {
-  const { plan, updateExercise } = useWorkoutStore();
+  const { plan, updateExercise, persistChanges, savingChanges, planError } = useWorkoutStore();
 
   const handleRemove = (id: string) => {
     const target = plan.exercises.find((ex) => ex.id === id);
@@ -30,6 +30,11 @@ const EditableWorkoutScreen: React.FC<Props> = ({ navigation }) => {
     updateExercise({ ...target, sets: target.sets + 1, actions: { ...target.actions, edited: true } });
   };
 
+  const handleSave = async () => {
+    await persistChanges();
+    navigation.goBack();
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.heading}>Edit your workout</Text>
@@ -46,13 +51,18 @@ const EditableWorkoutScreen: React.FC<Props> = ({ navigation }) => {
       ))}
 
       <View style={styles.buttonRow}>
-        <Pressable style={styles.secondaryButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.secondaryText}>Save My Changes</Text>
+        <Pressable style={styles.secondaryButton} onPress={handleSave} disabled={savingChanges}>
+          {savingChanges ? (
+            <ActivityIndicator color={colors.textPrimary} />
+          ) : (
+            <Text style={styles.secondaryText}>Save My Changes</Text>
+          )}
         </Pressable>
         <Pressable style={styles.primaryButton} onPress={() => navigation.navigate('ActiveWorkout')}>
           <Text style={styles.primaryText}>Start Workout</Text>
         </Pressable>
       </View>
+      {planError ? <Text style={styles.error}>{planError}</Text> : null}
     </ScrollView>
   );
 };
@@ -101,6 +111,11 @@ const styles = StyleSheet.create({
   secondaryText: {
     color: colors.textPrimary,
     fontWeight: '700',
+  },
+  error: {
+    color: '#ef4444',
+    marginTop: spacing.sm,
+    fontWeight: '600',
   },
 });
 

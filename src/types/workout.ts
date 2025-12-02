@@ -17,7 +17,7 @@ export interface ExerciseActions {
 
 export interface ExercisePlan {
   id: string;
-  name: string;
+  name?: string;
   sets: number;
   reps: string;
   target_weight: number;
@@ -55,4 +55,15 @@ export interface ExerciseGuideEntry {
   execution: string;
   mistakes: string;
   safety: string;
+}
+
+export interface TodayWorkoutPlan {
+  day: string;
+  workout_id?: string;
+  exercises: { id: string; sets: number; reps: string; target_weight: number; name?: string }[];
+}
+
+export interface FinishSummary {
+  message?: string;
+  progress?: Record<string, string> | null;
 }

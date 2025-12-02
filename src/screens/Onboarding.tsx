@@ -22,7 +22,7 @@ const steps: Step[] = [
 ];
 
 const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
-  const { setProfile, loadPlan, loadingPlan } = useWorkoutStore();
+  const { setProfile, loadPlan, loadingPlan, planError } = useWorkoutStore();
   const [activeStep, setActiveStep] = useState(0);
   const [goal, setGoal] = useState<Goal>('Hypertrophy');
   const [experience, setExperience] = useState<Experience>('Intermediate');
@@ -58,8 +58,12 @@ const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
     };
 
     setProfile(profile);
-    await loadPlan(profile);
-    navigation.replace('Dashboard');
+    try {
+      await loadPlan(profile);
+      navigation.replace('Dashboard');
+    } catch (error) {
+      // loadPlan handles error state; navigation will remain
+    }
   };
 
   const renderOptions = () => {
@@ -122,6 +126,7 @@ const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
           </Text>
         )}
       </Pressable>
+      {planError ? <Text style={styles.error}>{planError}</Text> : null}
     </View>
   );
 };
@@ -188,6 +193,11 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.6,
+  },
+  error: {
+    color: '#ef4444',
+    marginTop: spacing.sm,
+    fontWeight: '600',
   },
   inputStack: {
     gap: spacing.sm,

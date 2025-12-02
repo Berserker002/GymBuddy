@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useWorkoutStore } from '../state/useWorkoutStore';
 import { colors, spacing, radii } from '../theme';
@@ -9,11 +9,36 @@ import { RootStackParamList } from '../../App';
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
 const DashboardScreen: React.FC<Props> = ({ navigation }) => {
-  const { plan, profile, logs } = useWorkoutStore();
+  const { plan, profile, logs, fetchTodayWorkout, loadingPlan, planError } = useWorkoutStore();
   const nextLift = plan.exercises[0];
+
+  useEffect(() => {
+    fetchTodayWorkout();
+  }, []);
 
   const totalSets = plan.exercises.filter((ex) => !ex.actions.removed).reduce((sum, ex) => sum + ex.sets, 0);
   const completedSets = logs.reduce((sum, log) => sum + log.completedSets, 0);
+
+  if (loadingPlan) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <ActivityIndicator color={colors.primary} />
+        <Text style={styles.meta}>Loading today&apos;s workout...</Text>
+      </View>
+    );
+  }
+
+  if (planError) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <Text style={styles.greeting}>Something went wrong</Text>
+        <Text style={styles.meta}>{planError}</Text>
+        <Pressable style={[styles.primaryButton, styles.retry]} onPress={fetchTodayWorkout}>
+          <Text style={styles.primaryText}>Retry</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -113,6 +138,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
   },
+  center: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
   primaryButton: {
     flex: 1,
     backgroundColor: colors.primary,
@@ -134,6 +165,9 @@ const styles = StyleSheet.create({
   secondaryText: {
     color: colors.textPrimary,
     fontWeight: '700',
+  },
+  retry: {
+    alignSelf: 'stretch',
   },
   linkRow: {
     flexDirection: 'row',
