@@ -9,7 +9,9 @@ import { RootStackParamList } from '../../App';
 const ActiveWorkoutScreen: React.FC<NativeStackScreenProps<RootStackParamList, 'ActiveWorkout'>> = ({ navigation }) => {
   const { plan, logs, toggleSetCompletion } = useWorkoutStore();
 
-  const progress = Math.floor((logs.length / plan.exercises.length) * 100);
+  const totalSets = plan.exercises.filter((ex) => !ex.actions.removed).reduce((sum, ex) => sum + ex.sets, 0);
+  const completedSets = logs.reduce((sum, log) => sum + log.completedSets, 0);
+  const progress = totalSets ? Math.floor((completedSets / totalSets) * 100) : 0;
 
   return (
     <View style={styles.container}>
@@ -18,7 +20,7 @@ const ActiveWorkoutScreen: React.FC<NativeStackScreenProps<RootStackParamList, '
         <View style={styles.progressBar}>
           <View style={[styles.progressFill, { width: `${progress}%` }]} />
         </View>
-        <Text style={styles.progressText}>{logs.length}/{plan.exercises.length} done</Text>
+        <Text style={styles.progressText}>{completedSets}/{totalSets} sets logged</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -27,15 +29,19 @@ const ActiveWorkoutScreen: React.FC<NativeStackScreenProps<RootStackParamList, '
           .map((exercise) => {
             const footer = (
               <View style={styles.setRow}>
-                {Array.from({ length: exercise.sets }).map((_, idx) => (
-                  <Pressable
-                    key={idx}
-                    style={styles.setChip}
-                    onPress={() => toggleSetCompletion(exercise.id, idx, exercise.target_weight)}
-                  >
-                    <Text style={styles.setText}>Set {idx + 1}</Text>
-                  </Pressable>
-                ))}
+                {Array.from({ length: exercise.sets }).map((_, idx) => {
+                  const log = logs.find((entry) => entry.exerciseId === exercise.id);
+                  const isComplete = log?.weights[idx] !== null && log?.weights[idx] !== undefined;
+                  return (
+                    <Pressable
+                      key={idx}
+                      style={[styles.setChip, isComplete && styles.setChipComplete]}
+                      onPress={() => toggleSetCompletion(exercise.id, idx, exercise.target_weight)}
+                    >
+                      <Text style={[styles.setText, isComplete && styles.setTextComplete]}>Set {idx + 1}</Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             );
 
@@ -97,9 +103,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.muted,
     borderRadius: radii.sm,
   },
+  setChipComplete: {
+    backgroundColor: '#D1FAE5',
+    borderWidth: 1,
+    borderColor: '#10B981',
+  },
   setText: {
     color: colors.textPrimary,
     fontWeight: '600',
+  },
+  setTextComplete: {
+    color: '#065F46',
   },
   footer: {
     flexDirection: 'row',

@@ -1,17 +1,24 @@
 import create from 'zustand';
-import { ExercisePlan, WorkoutLog, WorkoutPlan } from '../types/workout';
+import { initProgram } from '../api/mockApi';
+import { ExercisePlan, Profile, WorkoutLog, WorkoutPlan } from '../types/workout';
 
 type WorkoutState = {
-  profile: {
-    goal: string;
-    experience: string;
-    equipment: string;
-  };
+  profile: Profile;
   plan: WorkoutPlan;
   logs: WorkoutLog[];
+  loadingPlan: boolean;
   toggleSetCompletion: (exerciseId: string, setIndex: number, weight: number) => void;
   updateExercise: (updated: ExercisePlan) => void;
+  setProfile: (profile: Profile) => void;
+  loadPlan: (profile?: Profile) => Promise<void>;
   reset: () => void;
+};
+
+const defaultProfile: Profile = {
+  goal: 'Hypertrophy',
+  experience: 'Intermediate',
+  equipment: 'Full Gym',
+  lifts: { bench: 60 },
 };
 
 const defaultPlan: WorkoutPlan = {
@@ -50,45 +57,36 @@ const defaultPlan: WorkoutPlan = {
   },
 };
 
-export const useWorkoutStore = create<WorkoutState>((set) => ({
-  profile: {
-    goal: 'Hypertrophy',
-    experience: 'Intermediate',
-    equipment: 'Full Gym',
-  },
+export const useWorkoutStore = create<WorkoutState>((set, get) => ({
+  profile: defaultProfile,
   plan: defaultPlan,
   logs: [],
+  loadingPlan: false,
   toggleSetCompletion: (exerciseId, setIndex, weight) =>
     set((state) => {
+      const exercise = state.plan.exercises.find((ex) => ex.id === exerciseId);
+      if (!exercise) return state;
+
+      const totalSets = exercise.sets;
       const existingLog = state.logs.find((log) => log.exerciseId === exerciseId);
-      if (existingLog) {
-        const updatedWeights = [...existingLog.weights];
-        updatedWeights[setIndex] = weight;
-        return {
-          logs: state.logs.map((log) =>
-            log.exerciseId === exerciseId
-              ? {
-                  ...log,
-                  completedSets: Math.max(log.completedSets, setIndex + 1),
-                  weights: updatedWeights,
-                }
-              : log
-          ),
-        };
-      }
-      return {
-        logs: [
-          ...state.logs,
-          {
-            exerciseId,
-            completedSets: setIndex + 1,
-            totalSets: state.plan.exercises.find((ex) => ex.id === exerciseId)?.sets || 0,
-            weights: Array(state.plan.exercises.find((ex) => ex.id === exerciseId)?.sets || 0)
-              .fill(null)
-              .map((_, idx) => (idx === setIndex ? weight : 0)),
-          },
-        ],
+      const weights = existingLog?.weights ? [...existingLog.weights] : Array(totalSets).fill(null);
+
+      const isCompleted = weights[setIndex] !== null;
+      weights[setIndex] = isCompleted ? null : weight;
+      const completedSets = weights.filter((entry) => entry !== null).length;
+
+      const newLog: WorkoutLog = {
+        exerciseId,
+        completedSets,
+        totalSets,
+        weights,
       };
+
+      const updatedLogs = existingLog
+        ? state.logs.map((log) => (log.exerciseId === exerciseId ? newLog : log))
+        : [...state.logs, newLog];
+
+      return { logs: updatedLogs };
     }),
   updateExercise: (updated) =>
     set((state) => ({
@@ -97,5 +95,12 @@ export const useWorkoutStore = create<WorkoutState>((set) => ({
         exercises: state.plan.exercises.map((ex) => (ex.id === updated.id ? updated : ex)),
       },
     })),
-  reset: () => set({ plan: defaultPlan, logs: [] }),
+  setProfile: (profile) => set({ profile }),
+  loadPlan: async (profileInput) => {
+    const profile = profileInput ?? get().profile;
+    set({ loadingPlan: true, profile });
+    const plan = await initProgram(profile);
+    set({ plan, loadingPlan: false, logs: [] });
+  },
+  reset: () => set({ plan: defaultPlan, logs: [], profile: defaultProfile, loadingPlan: false }),
 }));

@@ -1,13 +1,19 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { colors, spacing, radii } from '../theme';
+import { fetchHistory } from '../api/mockApi';
+import { HistoryEntry } from '../types/workout';
 
 const HistoryScreen: React.FC = () => {
-  const history = [
-    { date: '2024-05-01', lift: 'Bench Press', weight: 60 },
-    { date: '2024-05-08', lift: 'Bench Press', weight: 62.5 },
-    { date: '2024-05-15', lift: 'Bench Press', weight: 65 },
-  ];
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchHistory().then((data) => {
+      setHistory(data);
+      setLoading(false);
+    });
+  }, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -19,15 +25,19 @@ const HistoryScreen: React.FC = () => {
         <Text style={styles.placeholder}>[Line chart placeholder]</Text>
       </View>
 
-      <View style={styles.table}>
-        {history.map((entry) => (
-          <View key={entry.date} style={styles.row}>
-            <Text style={styles.cell}>{entry.date}</Text>
-            <Text style={styles.cell}>{entry.lift}</Text>
-            <Text style={styles.cell}>{entry.weight} kg</Text>
-          </View>
-        ))}
-      </View>
+      {loading ? (
+        <ActivityIndicator color={colors.primary} />
+      ) : (
+        <View style={styles.table}>
+          {history.map((entry) => (
+            <View key={`${entry.date}-${entry.weight}`} style={styles.row}>
+              <Text style={styles.cell}>{entry.date}</Text>
+              <Text style={styles.cell}>{entry.lift}</Text>
+              <Text style={styles.cell}>{entry.weight} kg</Text>
+            </View>
+          ))}
+        </View>
+      )}
     </ScrollView>
   );
 };

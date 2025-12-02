@@ -9,18 +9,23 @@ import { RootStackParamList } from '../../App';
 type Props = NativeStackScreenProps<RootStackParamList, 'Dashboard'>;
 
 const DashboardScreen: React.FC<Props> = ({ navigation }) => {
-  const { plan } = useWorkoutStore();
+  const { plan, profile, logs } = useWorkoutStore();
   const nextLift = plan.exercises[0];
+
+  const totalSets = plan.exercises.filter((ex) => !ex.actions.removed).reduce((sum, ex) => sum + ex.sets, 0);
+  const completedSets = logs.reduce((sum, log) => sum + log.completedSets, 0);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.greeting}>Welcome back!</Text>
       <Text style={styles.dayLabel}>{plan.day} · {plan.goal}</Text>
+      <Text style={styles.meta}>Goal: {profile.goal} · Experience: {profile.experience} · Equipment: {profile.equipment}</Text>
 
       <View style={styles.focusCard}>
         <Text style={styles.focusLabel}>Today&apos;s Focus</Text>
         <Text style={styles.focusTitle}>{plan.day}</Text>
         <Text style={styles.focusSubtitle}>Dialed for {plan.goal}</Text>
+        <Text style={styles.focusSubtitle}>Progress: {completedSets}/{totalSets} sets logged</Text>
       </View>
 
       <View style={styles.snippet}>
@@ -65,10 +70,14 @@ const styles = StyleSheet.create({
   dayLabel: {
     color: colors.textSecondary,
   },
+  meta: {
+    color: colors.textSecondary,
+  },
   focusCard: {
     backgroundColor: '#EEF2FF',
     padding: spacing.lg,
     borderRadius: radii.lg,
+    gap: spacing.xs,
   },
   focusLabel: {
     color: colors.primary,
