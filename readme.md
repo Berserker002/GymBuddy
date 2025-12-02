@@ -2,6 +2,14 @@
 
 This repository scaffolds the mobile front-end for **AI Gym Partner** using Expo + React Native. It mirrors the main flows from the PRD: onboarding, dashboard, editable workout, active workout logging, summary, history, and an exercise guide.
 
+## Current status
+
+- ✅ Navigation shell wired for all MVP screens (onboarding → dashboard → editable/active workout → summary, plus history and exercise guide).
+- ✅ Shared theming, ExerciseCard component, and a lightweight Zustand store with mocked workout data to demonstrate UI interactions.
+- ⚠️ All API calls are still stubbed; real Supabase auth, program generation, workout updates/logging, and history fetching need integration.
+- ⚠️ Offline caching, form validation, and error handling are not implemented yet.
+- ⚠️ Design polish (final typography, spacing, dark mode, icons) remains to be applied once real data flows in.
+
 ## Project structure
 - `App.tsx` sets up the navigation stack for all MVP screens.
 - `src/theme.ts` centralizes colors, spacing, and radii.
