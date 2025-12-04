@@ -30,4 +30,5 @@ ios/
 
 # Env
 .env*
+!.env.example
 
