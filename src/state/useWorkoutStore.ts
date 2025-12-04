@@ -78,13 +78,12 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   summary: null,
   toggleSetCompletion: (exerciseId, setIndex, weight) => {
     const { workoutId, plan } = get();
-    set((state) => {
-      const exercise = state.plan.exercises.find((ex) => ex.id === exerciseId);
-      if (!exercise) return state;
+    const exercise = plan.exercises.find((ex) => ex.id === exerciseId);
+    if (!exercise) return;
 
-      const totalSets = exercise.sets;
+    set((state) => {
       const existingLog = state.logs.find((log) => log.exerciseId === exerciseId);
-      const weights = existingLog?.weights ? [...existingLog.weights] : Array(totalSets).fill(null);
+      const weights = existingLog?.weights ? [...existingLog.weights] : Array(exercise.sets).fill(null);
 
       const isCompleted = weights[setIndex] !== null;
       weights[setIndex] = isCompleted ? null : weight;
@@ -93,7 +92,7 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
       const newLog: WorkoutLog = {
         exerciseId,
         completedSets,
-        totalSets,
+        totalSets: exercise.sets,
         weights,
       };
 
@@ -105,11 +104,9 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
     });
 
     if (!workoutId) return;
-    const exercise = plan.exercises.find((ex) => ex.id === exerciseId);
-    if (!exercise) return;
 
-    const logEntry = get().logs.find((log) => log.exerciseId === exerciseId);
-    const completed = (logEntry?.weights || []).filter((value) => value !== null).length === exercise.sets;
+    const updatedLog = get().logs.find((log) => log.exerciseId === exerciseId);
+    const completed = (updatedLog?.weights || []).filter((value) => value !== null).length === exercise.sets;
     const repsString = Array.from({ length: exercise.sets })
       .map(() => exercise.reps)
       .join(',');
