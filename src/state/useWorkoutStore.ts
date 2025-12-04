@@ -136,7 +136,9 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
     set({ loadingPlan: true, profile, planError: undefined });
     try {
       const payload = {
-        goal: profile.goal.toLowerCase() as 'hypertrophy' | 'strength' | 'fat_loss',
+        goal: profile.goal
+          .toLowerCase()
+          .replace(/\s+/g, '_') as 'hypertrophy' | 'strength' | 'fat_loss',
         experience: profile.experience.toLowerCase() as 'beginner' | 'intermediate' | 'advanced',
         equipment: [profile.equipment.toLowerCase()],
         lifts: profile.lifts,
