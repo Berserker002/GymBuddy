@@ -14,8 +14,10 @@ const ActiveWorkoutScreen: React.FC<NativeStackScreenProps<RootStackParamList, '
   const progress = totalSets ? Math.floor((completedSets / totalSets) * 100) : 0;
 
   const handleFinish = async () => {
-    await completeWorkout();
-    navigation.navigate('Summary');
+    const finished = await completeWorkout();
+    if (finished) {
+      navigation.navigate('Summary');
+    }
   };
 
   return (

@@ -19,7 +19,7 @@ type WorkoutState = {
   loadPlan: (profile?: Profile) => Promise<void>;
   fetchTodayWorkout: () => Promise<void>;
   persistChanges: () => Promise<void>;
-  completeWorkout: () => Promise<void>;
+  completeWorkout: () => Promise<boolean>;
   reset: () => void;
 };
 
@@ -211,14 +211,19 @@ export const useWorkoutStore = create<WorkoutState>((set, get) => ({
   },
   completeWorkout: async () => {
     const workoutId = get().workoutId;
-    if (!workoutId) return;
+    if (!workoutId) {
+      set({ planError: 'Cannot finish workout without an active session' });
+      return false;
+    }
 
     set({ finishing: true, planError: undefined });
     try {
       const result = await apiClient.finishWorkout(workoutId);
       set({ summary: { message: result.message, progress: result.progress } });
+      return true;
     } catch (error: any) {
       set({ planError: error.message || 'Failed to finish workout' });
+      return false;
     } finally {
       set({ finishing: false });
     }
