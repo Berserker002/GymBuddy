@@ -5,10 +5,9 @@ This repository scaffolds the mobile front-end for **AI Gym Partner** using Expo
 ## Current status
 
 - ✅ Navigation shell wired for all MVP screens (onboarding → dashboard → editable/active workout → summary, plus history and exercise guide).
-- ✅ Shared theming, ExerciseCard component, and a lightweight Zustand store with mocked workout data to demonstrate UI interactions.
-- ⚠️ All API calls are still stubbed; real Supabase auth, program generation, workout updates/logging, and history fetching need integration.
-- ⚠️ Offline caching, form validation, and error handling are not implemented yet.
-- ⚠️ Design polish (final typography, spacing, dark mode, icons) remains to be applied once real data flows in.
+- ✅ Shared theming, ExerciseCard component, and a lightweight Zustand store for workout state and API-backed flows.
+- ✅ Backend API integration for program initialization, today's workout, swaps, logging, finishing, history, and exercise guides (token provided via `EXPO_PUBLIC_API_TOKEN`).
+- ⚠️ Supabase auth, offline caching, form validation, and final design polish (typography, spacing, dark mode, icons) remain to be implemented.
 
 ## Project structure
 - `App.tsx` sets up the navigation stack for all MVP screens.
@@ -26,4 +25,7 @@ npm install
 npm run start
 ```
 
-Use the in-app navigation to explore each MVP screen and stub interactions. API calls are mocked or represented with placeholder text so backend integration can be added incrementally.
+### Windows/WSL note
+- If you work from Windows and the repo lives under a WSL path (e.g. `\\wsl.localhost\\Ubuntu\\home\\...\\GymBuddy`), run `npm run start` from a Linux shell inside WSL with a Linux Node/Expo install, or move the repo under a Windows drive (e.g. `C:\\Users\\<you>\\GymBuddy`). The `npm start` script will exit early with guidance if it detects an unsupported UNC path so Expo doesn't fall back to `C:\\Windows`.
+
+Use the in-app navigation to explore each MVP screen with live API calls. Ensure `EXPO_PUBLIC_API_TOKEN` is set in your environment when hitting the backend locally at `http://localhost:8000`.
