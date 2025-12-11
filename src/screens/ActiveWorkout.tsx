@@ -1,153 +1,138 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useWorkoutStore } from '../state/useWorkoutStore';
-import { colors, spacing, radii } from '../theme';
-import { ExerciseCard } from '../components/ExerciseCard';
 import { RootStackParamList } from '../../App';
+import { colors, radii, spacing } from '../theme';
+import { useAppStore } from '../state/appStore';
+import RestTimer from '../components/RestTimer';
+import { logWorkout } from '../api/client';
 
-const ActiveWorkoutScreen: React.FC<NativeStackScreenProps<RootStackParamList, 'ActiveWorkout'>> = ({ navigation }) => {
-  const { plan, logs, toggleSetCompletion, planError, completeWorkout, finishing } = useWorkoutStore();
+type Props = NativeStackScreenProps<RootStackParamList, 'ActiveWorkout'>;
 
-  const totalSets = plan.exercises.filter((ex) => !ex.actions.removed).reduce((sum, ex) => sum + ex.sets, 0);
-  const completedSets = logs.reduce((sum, log) => sum + log.completedSets, 0);
-  const progress = totalSets ? Math.floor((completedSets / totalSets) * 100) : 0;
+const ActiveWorkoutScreen: React.FC<Props> = ({ navigation }) => {
+  const { currentSession, currentDayPlan, logSet } = useAppStore();
+  const [resting, setResting] = useState(false);
+  const [weightInput, setWeightInput] = useState<string>('');
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | undefined>();
 
-  const handleFinish = async () => {
-    await completeWorkout();
-    navigation.navigate('Summary');
+  const nextExercise = useMemo(() => {
+    if (!currentSession || !currentDayPlan) return undefined;
+    const logsByExercise: Record<string, number> = {};
+    currentSession.exerciseLogs.forEach((log) => {
+      if (log.repsCompleted > 0) logsByExercise[log.exerciseId] = (logsByExercise[log.exerciseId] || 0) + 1;
+    });
+    return currentDayPlan.exercises.find((ex) => (logsByExercise[ex.id] || 0) < ex.suggestedSets);
+  }, [currentSession, currentDayPlan]);
+
+  if (!currentSession || !nextExercise) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <Text style={styles.heading}>Workout complete?</Text>
+        <Pressable style={styles.primaryButton} onPress={() => navigation.navigate('WorkoutSummary')}>
+          <Text style={styles.primaryText}>Go to Summary</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const setsCompleted = currentSession.exerciseLogs.filter(
+    (log) => log.exerciseId === nextExercise.id && log.repsCompleted > 0
+  ).length;
+
+  const handleCompleteSet = async () => {
+    const reps = nextExercise.suggestedReps;
+    const weightToUse = weightInput ? Number(weightInput) : nextExercise.suggestedWeightKg;
+    setSyncing(true);
+    setError(undefined);
+    try {
+      if (currentSession.fromBackend) {
+        await logWorkout({
+          workout_id: currentSession.id,
+          exercise_id: nextExercise.id,
+          actual_weight: weightToUse ?? null,
+          target_weight: nextExercise.suggestedWeightKg ?? null,
+          sets: 1,
+          reps: `${reps}`,
+          completed: true,
+        });
+      }
+      logSet(nextExercise.id, setsCompleted, reps, weightToUse);
+      setResting(true);
+      setWeightInput('');
+    } catch (err: any) {
+      setError(err.message || 'Could not log set');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const restComplete = () => {
+    setResting(false);
+    const totalSets = currentSession.exerciseLogs.filter((log) => log.exerciseId === nextExercise.id).length;
+    if (setsCompleted + 1 >= totalSets) {
+      // advance automatically by triggering rerender
+    }
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Active Workout</Text>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${progress}%` }]} />
-        </View>
-        <Text style={styles.progressText}>{completedSets}/{totalSets} sets logged</Text>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.content}>
-        {planError ? (
-          <Text style={styles.error}>{planError}</Text>
+      <Text style={styles.heading}>{nextExercise.name}</Text>
+      <Text style={styles.subheading}>
+        Set {setsCompleted + 1} of {nextExercise.suggestedSets} · {nextExercise.suggestedReps} reps
+      </Text>
+      <Text style={styles.helper}>Suggested weight: {nextExercise.suggestedWeightKg ?? '-'} kg</Text>
+      <TextInput
+        style={styles.input}
+        value={weightInput}
+        onChangeText={setWeightInput}
+        placeholder="Enter weight (optional)"
+        keyboardType="numeric"
+      />
+      <Pressable style={styles.primaryButton} onPress={handleCompleteSet} disabled={resting || syncing}>
+        {syncing ? (
+          <ActivityIndicator color="#fff" />
         ) : (
-          plan.exercises
-            .filter((ex) => !ex.actions.removed)
-            .map((exercise) => {
-              const footer = (
-                <View style={styles.setRow}>
-                  {Array.from({ length: exercise.sets }).map((_, idx) => {
-                    const log = logs.find((entry) => entry.exerciseId === exercise.id);
-                    const isComplete = log?.weights[idx] !== null && log?.weights[idx] !== undefined;
-                    return (
-                      <Pressable
-                        key={idx}
-                        style={[styles.setChip, isComplete && styles.setChipComplete]}
-                        onPress={() => toggleSetCompletion(exercise.id, idx, exercise.target_weight)}
-                      >
-                        <Text style={[styles.setText, isComplete && styles.setTextComplete]}>Set {idx + 1}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              );
-
-              return <ExerciseCard key={exercise.id} exercise={exercise} footer={footer} />;
-            })
+          <Text style={styles.primaryText}>{resting ? 'Resting' : 'Complete Set'}</Text>
         )}
-      </ScrollView>
-
-      <View style={styles.footer}>
-        <Pressable style={styles.secondaryButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.secondaryText}>Next Exercise</Text>
-        </Pressable>
-        <Pressable style={styles.primaryButton} onPress={handleFinish} disabled={finishing}>
-          {finishing ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>Finish Workout</Text>}
-        </Pressable>
-      </View>
+      </Pressable>
+      {resting && <RestTimer restSeconds={nextExercise.restSeconds} onComplete={restComplete} />}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <Pressable style={styles.secondaryButton} onPress={() => navigation.navigate('WorkoutSummary')}>
+        <Text style={styles.secondaryText}>Finish</Text>
+      </Pressable>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.backgroundLight },
-  header: {
-    padding: spacing.lg,
-    backgroundColor: '#EFF6FF',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  progressBar: {
-    marginTop: spacing.md,
-    width: '100%',
-    height: 10,
-    backgroundColor: colors.muted,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-  },
-  progressText: {
-    marginTop: spacing.sm,
-    color: colors.textSecondary,
-  },
-  content: {
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  setRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  setChip: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    backgroundColor: colors.muted,
-    borderRadius: radii.sm,
-  },
-  setChipComplete: {
-    backgroundColor: '#D1FAE5',
+  container: { flex: 1, padding: spacing.lg, gap: spacing.md, backgroundColor: colors.backgroundLight },
+  center: { justifyContent: 'center', alignItems: 'center' },
+  heading: { fontSize: 24, fontWeight: '700', color: colors.textPrimary },
+  subheading: { color: colors.textSecondary },
+  helper: { color: colors.textSecondary },
+  input: {
     borderWidth: 1,
-    borderColor: '#10B981',
-  },
-  setText: {
-    color: colors.textPrimary,
-    fontWeight: '600',
-  },
-  setTextComplete: {
-    color: '#065F46',
-  },
-  footer: {
-    flexDirection: 'row',
-    padding: spacing.lg,
-    gap: spacing.sm,
+    borderColor: colors.muted,
+    borderRadius: radii.md,
+    padding: spacing.sm,
   },
   primaryButton: {
-    flex: 1,
     backgroundColor: colors.primary,
     paddingVertical: spacing.md,
     borderRadius: radii.md,
     alignItems: 'center',
   },
   primaryText: { color: '#fff', fontWeight: '700' },
+  error: { color: '#ef4444' },
   secondaryButton: {
-    flex: 1,
-    backgroundColor: colors.muted,
     paddingVertical: spacing.md,
     borderRadius: radii.md,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.muted,
   },
   secondaryText: { color: colors.textPrimary, fontWeight: '700' },
-  error: {
-    color: '#ef4444',
-  },
 });
 
 export default ActiveWorkoutScreen;

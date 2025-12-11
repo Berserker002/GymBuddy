@@ -1,227 +1,395 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TextInput, ScrollView, ActivityIndicator } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { colors, spacing, radii } from '../theme';
 import { RootStackParamList } from '../../App';
-import { Goal, Equipment, Experience, Profile } from '../types/workout';
-import { useWorkoutStore } from '../state/useWorkoutStore';
+import { colors, radii, spacing } from '../theme';
+import { useAppStore } from '../state/appStore';
+import { EquipmentType, StrengthEstimate, UserProfile } from '../types/models';
+import { initializeProgramFromBackend } from '../api/client';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Onboarding'>;
 
-type Step =
-  | { key: 'goal'; title: string; options: Goal[] }
-  | { key: 'experience'; title: string; options: Experience[] }
-  | { key: 'equipment'; title: string; options: Equipment[] }
-  | { key: 'lifts'; title: string };
+type StepKey =
+  | 'welcome'
+  | 'equipment'
+  | 'basic'
+  | 'strength'
+  | 'goal'
+  | 'frequency'
+  | 'preview'
+  | 'ready';
 
-const steps: Step[] = [
-  { key: 'goal', title: 'Goal', options: ['Strength', 'Hypertrophy', 'Fat Loss'] },
-  { key: 'experience', title: 'Experience', options: ['Beginner', 'Intermediate', 'Advanced'] },
-  { key: 'equipment', title: 'Equipment', options: ['Full Gym', 'Home', 'Minimal'] },
-  { key: 'lifts', title: 'Optional Lifts' },
-];
+const weightChips = [20, 30, 40, 50, 60, 70, 80];
+
+interface StrengthFieldProps {
+  fieldKey: keyof StrengthEstimate;
+  label: string;
+  value?: number;
+  onSelect: (value?: number) => void;
+}
+
+const StrengthField: React.FC<StrengthFieldProps> = ({ fieldKey, label, value, onSelect }) => {
+  const [customVisible, setCustomVisible] = useState(false);
+
+  return (
+    <View key={fieldKey} style={styles.strengthField}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.chipRow}>
+        {weightChips.map((chip) => (
+          <Pressable
+            key={chip}
+            style={[styles.chip, value === chip && styles.chipSelected]}
+            onPress={() => {
+              onSelect(chip);
+              setCustomVisible(false);
+            }}
+          >
+            <Text style={[styles.chipText, value === chip && styles.chipTextSelected]}>{chip}</Text>
+          </Pressable>
+        ))}
+        <Pressable style={[styles.chip, customVisible && styles.chipSelected]} onPress={() => setCustomVisible(true)}>
+          <Text style={[styles.chipText, customVisible && styles.chipTextSelected]}>Custom</Text>
+        </Pressable>
+      </View>
+      {customVisible && (
+        <TextInput
+          style={styles.input}
+          placeholder="Enter value"
+          keyboardType="numeric"
+          value={value ? String(value) : ''}
+          onChangeText={(text) => onSelect(text ? Number(text) : undefined)}
+        />
+      )}
+    </View>
+  );
+};
 
 const OnboardingScreen: React.FC<Props> = ({ navigation }) => {
-  const { setProfile, loadPlan, loadingPlan, planError } = useWorkoutStore();
-  const [activeStep, setActiveStep] = useState(0);
-  const [goal, setGoal] = useState<Goal>('Hypertrophy');
-  const [experience, setExperience] = useState<Experience>('Intermediate');
-  const [equipment, setEquipment] = useState<Equipment>('Full Gym');
-  const [lifts, setLifts] = useState({ bench: '60', squat: '', deadlift: '', ohp: '' });
+  const {
+    setUserProfile,
+    setStrengthEstimate,
+    setTrainingProgram,
+    markOnboardingComplete,
+  } = useAppStore();
 
-  const currentStep = steps[activeStep];
+  const [step, setStep] = useState<StepKey>('welcome');
+  const [equipment, setEquipment] = useState<EquipmentType | undefined>();
+  const [gender, setGender] = useState<UserProfile['gender']>('male');
+  const [age, setAge] = useState('25');
+  const [heightCm, setHeightCm] = useState('175');
+  const [weightKg, setWeightKg] = useState('');
+  const [goal, setGoal] = useState<UserProfile['goal']>('muscle');
+  const [trainingDays, setTrainingDays] = useState<number | undefined>();
+  const [strength, setStrength] = useState<StrengthEstimate>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  const equipmentStrengthFields = useMemo(() => {
+    if (equipment === 'full_gym') return ['benchPressKg', 'squatKg', 'deadliftKg', 'latPulldownKg'] as const;
+    if (equipment === 'dumbbells') return ['dumbbellPressKg', 'dumbbellRowKg', 'gobletSquatKg'] as const;
+    return ['maxPushups', 'maxPullups', 'plankSeconds'] as const;
+  }, [equipment]);
 
   const canContinue = useMemo(() => {
-    if (currentStep.key === 'goal') return Boolean(goal);
-    if (currentStep.key === 'experience') return Boolean(experience);
-    if (currentStep.key === 'equipment') return Boolean(equipment);
-    return true;
-  }, [currentStep.key, goal, experience, equipment]);
-
-  const handleNext = async () => {
-    if (activeStep < steps.length - 1) {
-      setActiveStep((prev) => prev + 1);
-      return;
+    switch (step) {
+      case 'equipment':
+        return Boolean(equipment);
+      case 'basic':
+        return Boolean(age && heightCm && gender);
+      case 'goal':
+        return Boolean(goal);
+      case 'frequency':
+        return Boolean(trainingDays);
+      case 'preview':
+        return true;
+      default:
+        return true;
     }
+  }, [age, equipment, gender, goal, heightCm, step, trainingDays]);
 
-    const parsedLifts = Object.fromEntries(
-      Object.entries(lifts)
-        .filter(([, value]) => value !== '')
-        .map(([key, value]) => [key, Number(value)])
-    );
-
-    const profile: Profile = {
-      goal,
-      experience,
+  const handleGenerateProgram = async () => {
+    if (!equipment || !trainingDays) return;
+    setLoading(true);
+    setError(undefined);
+    const profile: UserProfile = {
+      gender,
+      age: Number(age),
+      heightCm: Number(heightCm),
+      weightKg: weightKg ? Number(weightKg) : undefined,
       equipment,
-      lifts: parsedLifts,
+      goal,
+      trainingDaysPerWeek: trainingDays,
     };
+    setUserProfile(profile);
+    setStrengthEstimate(strength);
 
-    setProfile(profile);
     try {
-      await loadPlan(profile);
-      navigation.replace('Dashboard');
-    } catch (error) {
-      // loadPlan handles error state; navigation will remain
+      const response = await initializeProgramFromBackend({
+        profile: {
+          gender: profile.gender,
+          age: profile.age,
+          height_cm: profile.heightCm,
+          weight_kg: profile.weightKg,
+          equipment: profile.equipment,
+          goal: profile.goal,
+          training_days: profile.trainingDaysPerWeek,
+        },
+        strength: strength as Record<string, number | undefined>,
+      });
+
+      const trainingProgram = {
+        id: response.id,
+        daysPerWeek: response.days_per_week,
+        days: response.days.map((day) => ({
+          dayIndex: day.day,
+          label: day.label,
+          exercises: day.exercises.map((exercise, idx) => ({
+            id: exercise.id || `${day.label}-${idx}`,
+            name: exercise.name || exercise.id || `Exercise ${idx + 1}`,
+            equipment: equipment ?? 'any',
+            suggestedWeightKg: exercise.target_weight ?? exercise.suggestedWeightKg,
+            suggestedReps: exercise.reps ?? exercise.suggestedReps ?? 10,
+            suggestedSets: exercise.sets ?? exercise.suggestedSets ?? 3,
+            restSeconds: exercise.restSeconds ?? 90,
+          })),
+        })),
+      };
+
+      setTrainingProgram(trainingProgram);
+      setStep('ready');
+      markOnboardingComplete();
+    } catch (err: any) {
+      setError(err.message || 'Failed to initialize program');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const renderOptions = () => {
-    if (currentStep.key === 'lifts') {
-      return (
-        <View style={styles.inputStack}>
-          <Text style={styles.helper}>Optional: add your current bests to personalize targets.</Text>
-          {Object.keys(lifts).map((liftKey) => (
-            <View key={liftKey} style={styles.inputRow}>
-              <Text style={styles.inputLabel}>{liftKey.toUpperCase()}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="kg"
-                keyboardType="numeric"
-                value={(lifts as any)[liftKey]}
-                onChangeText={(text) => setLifts((prev) => ({ ...prev, [liftKey]: text }))}
-              />
+  const renderCardButton = (label: string, selected: boolean, onPress: () => void) => (
+    <Pressable style={[styles.card, selected && styles.cardSelected]} onPress={onPress}>
+      <Text style={[styles.cardText, selected && styles.cardTextSelected]}>{label}</Text>
+    </Pressable>
+  );
+
+  const renderStep = () => {
+    switch (step) {
+      case 'welcome':
+        return (
+          <View style={styles.centered}>
+            <Text style={styles.heading}>Welcome</Text>
+            <Text style={styles.subheading}>Your smart personal workout companion</Text>
+            <Pressable style={styles.primaryButton} onPress={() => setStep('equipment')}>
+              <Text style={styles.primaryText}>Get Started</Text>
+            </Pressable>
+          </View>
+        );
+      case 'equipment':
+        return (
+          <View style={styles.stepContainer}>
+            <Text style={styles.heading}>What equipment do you have?</Text>
+            <View style={styles.stack}>
+              {renderCardButton('Full Gym', equipment === 'full_gym', () => setEquipment('full_gym'))}
+              {renderCardButton('Dumbbells Only', equipment === 'dumbbells', () => setEquipment('dumbbells'))}
+              {renderCardButton('Bodyweight Only', equipment === 'bodyweight', () => setEquipment('bodyweight'))}
             </View>
-          ))}
-        </View>
-      );
+          </View>
+        );
+      case 'basic':
+        return (
+          <View style={styles.stepContainer}>
+            <Text style={styles.heading}>Tell us about you</Text>
+            <Text style={styles.label}>Gender</Text>
+            <View style={styles.chipRow}>
+              {(['male', 'female', 'other'] as const).map((g) => (
+                <Pressable
+                  key={g}
+                  style={[styles.chip, gender === g && styles.chipSelected]}
+                  onPress={() => setGender(g)}
+                >
+                  <Text style={[styles.chipText, gender === g && styles.chipTextSelected]}>{g}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.label}>Age</Text>
+            <TextInput style={styles.input} value={age} onChangeText={setAge} keyboardType="numeric" />
+            <Text style={styles.label}>Height (cm)</Text>
+            <TextInput style={styles.input} value={heightCm} onChangeText={setHeightCm} keyboardType="numeric" />
+            <Text style={styles.label}>Weight (kg, optional)</Text>
+            <TextInput style={styles.input} value={weightKg} onChangeText={setWeightKg} keyboardType="numeric" />
+          </View>
+        );
+      case 'strength':
+        return (
+          <ScrollView contentContainerStyle={styles.stepContainer}>
+            <Text style={styles.heading}>Estimate your strength</Text>
+            {equipmentStrengthFields.map((field) => (
+              <StrengthField
+                key={field}
+                fieldKey={field}
+                label={field.replace(/([A-Z])/g, ' $1')}
+                value={strength[field]}
+                onSelect={(val) => setStrength((prev) => ({ ...prev, [field]: val }))}
+              />
+            ))}
+          </ScrollView>
+        );
+      case 'goal':
+        return (
+          <View style={styles.stepContainer}>
+            <Text style={styles.heading}>What’s your goal?</Text>
+            <View style={styles.stack}>
+              {renderCardButton('Build Muscle', goal === 'muscle', () => setGoal('muscle'))}
+              {renderCardButton('Lose Fat', goal === 'fat_loss', () => setGoal('fat_loss'))}
+              {renderCardButton('Get Strong', goal === 'strength', () => setGoal('strength'))}
+              {renderCardButton('Stay Fit', goal === 'fitness', () => setGoal('fitness'))}
+            </View>
+          </View>
+        );
+      case 'frequency':
+        return (
+          <View style={styles.stepContainer}>
+            <Text style={styles.heading}>How many days per week do you want to train?</Text>
+            <View style={styles.chipRow}>
+              {[2, 3, 4, 5, 6].map((day) => (
+                <Pressable
+                  key={day}
+                  style={[styles.chip, trainingDays === day && styles.chipSelected]}
+                  onPress={() => setTrainingDays(day)}
+                >
+                  <Text style={[styles.chipText, trainingDays === day && styles.chipTextSelected]}>{day}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        );
+      case 'preview':
+        return (
+          <View style={styles.stepContainer}>
+            <Text style={styles.heading}>Program Preview</Text>
+            <Text style={styles.subheading}>You’ll train {trainingDays} days per week.</Text>
+            <Text style={styles.helper}>We’ll generate a simple starting program tailored to your details.</Text>
+          </View>
+        );
+      case 'ready':
+        return (
+          <View style={styles.centered}>
+            <Text style={styles.heading}>Your plan is ready!</Text>
+            <Text style={styles.subheading}>You’re all set to begin.</Text>
+            <Pressable style={styles.primaryButton} onPress={() => navigation.replace('StartWorkout')}>
+              <Text style={styles.primaryText}>Start Workout</Text>
+            </Pressable>
+          </View>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const handleNext = async () => {
+    if (step === 'ready') return;
+    if (step === 'preview') {
+      await handleGenerateProgram();
+      return;
     }
 
-    const options = currentStep.options;
-    return (
-      <View style={styles.optionGrid}>
-        {options.map((option) => (
-          <Pressable
-            key={option}
-            style={[styles.option, option === (currentStep.key === 'goal' ? goal : currentStep.key === 'experience' ? experience : equipment) ? styles.optionSelected : null]}
-            onPress={() => {
-              if (currentStep.key === 'goal') setGoal(option as Goal);
-              if (currentStep.key === 'experience') setExperience(option as Experience);
-              if (currentStep.key === 'equipment') setEquipment(option as Equipment);
-            }}
-          >
-            <Text style={styles.optionText}>{option}</Text>
-          </Pressable>
-        ))}
-      </View>
-    );
+    const order: StepKey[] = ['welcome', 'equipment', 'basic', 'strength', 'goal', 'frequency', 'preview', 'ready'];
+    const nextIndex = order.indexOf(step) + 1;
+    setStep(order[nextIndex]);
+  };
+
+  const handleBack = () => {
+    const order: StepKey[] = ['welcome', 'equipment', 'basic', 'strength', 'goal', 'frequency', 'preview', 'ready'];
+    const idx = order.indexOf(step);
+    if (idx > 0) setStep(order[idx - 1]);
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Personalize your plan</Text>
-      <Text style={styles.subheading}>Step {activeStep + 1} of {steps.length}</Text>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>{currentStep.title}</Text>
-        {renderOptions()}
-      </View>
-
-      <Pressable style={[styles.primaryButton, !canContinue && styles.disabled]} onPress={handleNext} disabled={!canContinue || loadingPlan}>
-        {loadingPlan ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.primaryText}>
-            {activeStep === steps.length - 1 ? 'Generate My Program' : 'Next'}
-          </Text>
-        )}
-      </Pressable>
-      {planError ? <Text style={styles.error}>{planError}</Text> : null}
+      <ScrollView contentContainerStyle={styles.content}>{renderStep()}</ScrollView>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {step !== 'ready' && (
+        <View style={styles.footer}>
+          {step !== 'welcome' && (
+            <Pressable style={styles.secondaryButton} onPress={handleBack}>
+              <Text style={styles.secondaryText}>Back</Text>
+            </Pressable>
+          )}
+          <Pressable
+            style={[styles.primaryButton, !canContinue && styles.disabled]}
+            disabled={!canContinue || loading}
+            onPress={handleNext}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.primaryText}>{step === 'preview' ? 'Continue' : 'Next'}</Text>
+            )}
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: spacing.lg,
-    backgroundColor: colors.backgroundLight,
-    gap: spacing.lg,
-  },
-  heading: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  subheading: {
-    color: colors.textSecondary,
-  },
+  container: { flex: 1, backgroundColor: colors.backgroundLight },
+  content: { padding: spacing.lg, gap: spacing.lg },
+  heading: { fontSize: 24, fontWeight: '700', color: colors.textPrimary },
+  subheading: { color: colors.textSecondary, marginTop: spacing.sm },
+  helper: { color: colors.textSecondary, marginTop: spacing.md },
+  stack: { gap: spacing.sm },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.md },
   card: {
+    padding: spacing.lg,
     backgroundColor: '#F8FAFC',
     borderRadius: radii.lg,
-    padding: spacing.lg,
-    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.muted,
   },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.textPrimary,
+  cardSelected: {
+    borderColor: colors.primary,
+    backgroundColor: '#EEF2FF',
   },
-  optionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  option: {
+  cardText: { fontWeight: '700', color: colors.textPrimary },
+  cardTextSelected: { color: colors.primary },
+  stepContainer: { gap: spacing.md, padding: spacing.lg },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  chip: {
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     backgroundColor: colors.muted,
     borderRadius: radii.md,
   },
-  optionSelected: {
-    backgroundColor: colors.primary,
-  },
-  optionText: {
-    color: colors.textPrimary,
-    fontWeight: '600',
-  },
-  primaryButton: {
-    marginTop: 'auto',
-    backgroundColor: colors.primary,
-    paddingVertical: spacing.md,
-    borderRadius: radii.lg,
-    alignItems: 'center',
-    shadowColor: colors.primary,
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-  },
-  primaryText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  disabled: {
-    opacity: 0.6,
-  },
-  error: {
-    color: '#ef4444',
-    marginTop: spacing.sm,
-    fontWeight: '600',
-  },
-  inputStack: {
-    gap: spacing.sm,
-  },
-  helper: {
-    color: colors.textSecondary,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  inputLabel: {
-    width: 60,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
+  chipSelected: { backgroundColor: colors.primary },
+  chipText: { color: colors.textPrimary, fontWeight: '600' },
+  chipTextSelected: { color: '#fff' },
+  label: { fontWeight: '700', color: colors.textPrimary },
   input: {
-    flex: 1,
     borderWidth: 1,
     borderColor: colors.muted,
-    borderRadius: radii.md,
     padding: spacing.sm,
+    borderRadius: radii.md,
   },
+  strengthField: { gap: spacing.sm },
+  footer: { flexDirection: 'row', padding: spacing.lg, gap: spacing.sm },
+  primaryButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    alignItems: 'center',
+  },
+  primaryText: { color: '#fff', fontWeight: '700' },
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: colors.muted,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    alignItems: 'center',
+  },
+  secondaryText: { color: colors.textPrimary, fontWeight: '700' },
+  disabled: { opacity: 0.5 },
+  error: { color: '#ef4444', paddingHorizontal: spacing.lg },
 });
 
 export default OnboardingScreen;

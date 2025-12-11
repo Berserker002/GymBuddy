@@ -1,44 +1,38 @@
 const BASE_URL = 'http://localhost:8000';
 
-export type ApiGoal = 'hypertrophy' | 'strength' | 'fat_loss';
-export type ApiExperience = 'beginner' | 'intermediate' | 'advanced';
-
 export interface ProgramInitRequest {
-  goal: ApiGoal;
-  experience: ApiExperience;
-  equipment: string[];
-  lifts?: Record<string, number>;
+  profile: {
+    gender: string;
+    age: number;
+    height_cm: number;
+    weight_kg?: number;
+    equipment: string;
+    goal: string;
+    training_days: number;
+  };
+  strength: Record<string, number | undefined>;
 }
 
 export interface ProgramInitResponse {
   id: string;
-  split: string;
-  program_json: {
-    split: string;
-    days: {
-      day: string;
-      exercises: { id: string; sets: number; reps: string; target_weight: number }[];
-    }[];
-    generated_at: string;
-  };
-  created_at: string;
+  days_per_week: number;
+  days: { day: number; label: string; exercises: any[] }[];
 }
 
 export interface TodayWorkoutResponse {
   day: string;
-  workout_id?: string;
-  exercises: { id: string; sets: number; reps: string; target_weight: number; name?: string }[];
+  day_label: string;
+  exercises: any[];
+  workout_id: string;
 }
 
 export interface UpdateWorkoutRequest {
-  day: string;
-  changes: { exercise_id: string; action: 'swap'; new_exercise: string }[];
+  workout_id: string;
+  changes: unknown[];
 }
 
 export interface UpdateWorkoutResponse {
   status: string;
-  changes: { exercise_id: string; action: 'swap'; new_exercise: string }[];
-  preferences?: Record<string, string>;
 }
 
 export interface LogWorkoutRequest {
@@ -53,7 +47,6 @@ export interface LogWorkoutRequest {
 
 export interface LogWorkoutResponse {
   status: string;
-  log_id?: string;
 }
 
 export interface FinishWorkoutResponse {
@@ -97,7 +90,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
 
   const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-
   const contentType = response.headers.get('content-type');
   const isJson = contentType?.includes('application/json');
   const body = isJson ? await response.json() : await response.text();
@@ -109,18 +101,42 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
-export const apiClient = {
-  initializeProgram: (payload: ProgramInitRequest) =>
-    request<ProgramInitResponse>('/api/program/init', { method: 'POST', body: JSON.stringify(payload) }),
-  getTodaysWorkout: () => request<TodayWorkoutResponse>('/api/workout/today'),
-  updateWorkout: (payload: UpdateWorkoutRequest) =>
-    request<UpdateWorkoutResponse>('/api/workout/update', { method: 'PATCH', body: JSON.stringify(payload) }),
-  logWorkout: (payload: LogWorkoutRequest) =>
-    request<LogWorkoutResponse>('/api/workout/log', { method: 'POST', body: JSON.stringify(payload) }),
-  finishWorkout: (workoutId: string) => request<FinishWorkoutResponse>(`/api/workout/finish?workout_id=${workoutId}`, { method: 'POST' }),
-  getHistory: (exerciseId: string) => request<HistoryResponse>(`/api/history?exercise_id=${encodeURIComponent(exerciseId)}`),
-  getExerciseGuide: (payload: ExerciseGuideRequest) =>
-    request<ExerciseGuideResponse>('/api/exercise/guide', { method: 'POST', body: JSON.stringify(payload) }),
-};
+export async function initializeProgramFromBackend(body: ProgramInitRequest): Promise<ProgramInitResponse> {
+  return request('/api/program/init', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function getTodaysWorkout(): Promise<TodayWorkoutResponse> {
+  return request('/api/workout/today');
+}
+
+export async function updateEditableWorkout(body: UpdateWorkoutRequest): Promise<UpdateWorkoutResponse> {
+  return request('/api/workout/update', { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export async function logWorkout(body: LogWorkoutRequest): Promise<LogWorkoutResponse> {
+  return request('/api/workout/log', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function finishWorkout(workoutId: string): Promise<FinishWorkoutResponse> {
+  return request(`/api/workout/finish?workout_id=${workoutId}`, { method: 'POST' });
+}
+
+export async function getExerciseHistory(exerciseId: string): Promise<HistoryResponse> {
+  return request(`/api/history?exercise_id=${encodeURIComponent(exerciseId)}`);
+}
+
+export async function getExerciseGuide(body: ExerciseGuideRequest): Promise<ExerciseGuideResponse> {
+  return request('/api/exercise/guide', { method: 'POST', body: JSON.stringify(body) });
+}
 
 export { ApiError };
+
+export const apiClient = {
+  initializeProgram: initializeProgramFromBackend,
+  getTodaysWorkout,
+  updateWorkout: updateEditableWorkout,
+  logWorkout,
+  finishWorkout,
+  getHistory: getExerciseHistory,
+  getExerciseGuide,
+};
